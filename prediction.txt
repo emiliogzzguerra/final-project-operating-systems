@@ -1,0 +1,20 @@
+This is a prediction of what we think should happen when calling
+python ./clientALL.pyc SJF 1
+
+P1(0.0,5) |---------->5                           x
+P2(0.2,3) |                    ---x
+P3(0.5,1) |       x
+p4(2.6,2)       |     ---->8         x
+p5(3.9,4)          |                      ---_I/O_----->17 x
+p6(3.9,3)          |               ------>13      x
+p7(5.3,1)               |  -->6     x
+
+KILL PROCESSES:
+P Time
+3 3.9
+2 10.0
+7 11.9
+4 12.3
+6 16.8
+5 18.1
+1 17.0
