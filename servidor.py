@@ -8,6 +8,8 @@ import time
 import heapq
 from tabulate import tabulate
 from prettytable import PrettyTable
+import copy
+
 
 # Create a TCP/IP socket
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -55,14 +57,24 @@ cpu1 = []
 blocked = []
 # List to store the finished readyQueue
 finished = []
+# List to store the killed processes
+killed = []
+# Have we started?
+started = False
+# This variable determines wether we want userFriendly or verbose output
+verbose = False
+
 # Table for 1 CPU
-table1data = [[],[],[],[],[],[]]
+table1data = [0] * 19
+
 table1 = PrettyTable(['Timestamp',
          'Llegadas',
          'Cola de listos',
          'CPU 1',
          'Procesos bloqueados',
-         'Procesos terminados'])
+         'Procesos terminados',
+         'Procesos matados'])
+
 # Table for 2 CPU's
 table2data = [[],[],[],[],[],[],[]]
 table2 = PrettyTable(['Timestamp',
@@ -71,10 +83,26 @@ table2 = PrettyTable(['Timestamp',
          'CPU 1',
          'CPU 2',
          'Procesos bloqueados',
-         'Procesos terminados'])
+         'Procesos terminados',
+         'Procesos matados'])
+
+
+def userFriendlyList(list):
+    auxList = []
+    if list:
+        if isinstance(list[0], tuple):
+            print "entered"
+            for item in list:
+                print item
+                auxList.append('P{}'.format(item[1]))
+        else:
+            auxList.append('P{}'.format(list[1]))
+    return auxList
 
 try:
     print >>sys.stderr, 'connection from', client_address
+    if(len(sys.argv) > 3 and sys.argv[3] == "verbose"):
+        verbose = True
     if(sys.argv[1] == "SJF"):
         if(sys.argv[2] == "1"): # One CPU
             print "One CPU, SJF"
@@ -83,27 +111,36 @@ try:
                 if data:
                     # Split the data received to understand which is the action to do
                     splitData = data.split()
-
                     if(splitData[1] == "CREATE"):
-                        aux = (int(splitData[3]), processNumber, len(readyQueue)+1)
+                        aux = (int(splitData[3]), processNumber, len(readyQueue)+1, float(splitData[0]))
 
-                        # This is run only for the first process that is created
-                        if not readyQueue:
-                            copyNonEditedRunning = aux
-                            cpu1 = [int(splitData[3]), processNumber]
-                            print 'CT:{} || Started ({},P{})'.format(currentTime,cpu1[0], cpu1[1])
-
-                        # Every we add the process, then we sort the whole list
+                        # Add the process to arrived and ready
                         arrived.append(aux)
                         readyQueue.append(aux)
+
+                        # This is run only for the first process that is created
+                        if not started:
+                            copyNonEditedRunning = aux
+                            cpu1 = [int(splitData[3]), processNumber]
+                            started = True
+                            readyQueue.remove(aux)
+
+                        # Sort the readyQueue
                         readyQueue = sorted(readyQueue, key = lambda tup: (tup[0], tup[2]))
 
                         # Increment the process number
                         processNumber += 1
                     elif(splitData[1] == "QUANTUM"):
                         # Print current state
-                        table1.add_row([currentTime,arrived,readyQueue,cpu1,blocked,finished])
+                        if verbose:
+                            table1.add_row([currentTime,copy.deepcopy(arrived),copy.deepcopy(readyQueue),copy.deepcopy(cpu1),copy.deepcopy(blocked),copy.deepcopy(finished),copy.deepcopy(killed)])
+                        else:
+                            table1.add_row([currentTime,userFriendlyList(arrived),userFriendlyList(readyQueue),userFriendlyList(cpu1),userFriendlyList(blocked),userFriendlyList(finished),userFriendlyList(killed)])
+
+
                         print table1
+
+                        # Reset arrived list
                         arrived = []
 
                         # Increment the global time, and decrement the timeToLive of
@@ -115,61 +152,55 @@ try:
                         # we remove that process from the list, and assign a new
                         # cpu1 process.
                         if(cpu1[0] == 0):
-                            print 'CT:{} || Finished ({},P{})'.format(currentTime,cpu1[0], cpu1[1])
                             finished.append(cpu1)
-                            readyQueue.remove(copyNonEditedRunning)
 
                             # There are no more readyQueue, we're done
                             if not readyQueue:
-                                print 'CT:{} || We are DONE'.format(currentTime)
                                 done = True
                             else: # There are still more readyQueue
                                 copyNonEditedRunning = readyQueue[0]
                                 cpu1 = [readyQueue[0][0], readyQueue[0][1]]
                                 readyQueue.remove(copyNonEditedRunning)
-                                print 'CT:{} || Started ({},P{})'.format(currentTime,cpu1[0], cpu1[1])
-                        else:
-                            # We're in the process of running a process, we just display
-                            # the progress.
-                            if not done:
-                                print 'CT:{} || ({},P{}) Running'.format(currentTime,cpu1[0], cpu1[1])
                     elif(splitData[1] == "INICIA"):
-                        # Make sure that the process is currently running
-                        if (cpu1[1] == int(splitData[3])):
-                            blocked.append(cpu1)
+                        if (cpu1[1] == splitData[3]):
+                            blocked.append(cpu1[0], cpu1[1], copyNonEditedRunning[2], copyNonEditedRunning[3])
+
+                            # Add another process to the CPU
+                            if not readyQueue:
+                                done = True
+                            else: # There are still more processes on readyQueue
+                                copyNonEditedRunning = readyQueue[0]
+                                cpu1 = [readyQueue[0][0], readyQueue[0][1]]
+                                readyQueue.remove(copyNonEditedRunning)
 
                     elif(splitData[1] == "TERMINA"):
                         # Find the blocked process
                         for blockedProcess in blocked:
-                            if (blockedProcess[1] == int(splitData[3])):
+                            if (blockedProcess[1] == splitData[3]):
                                 readyQueue.append(blockedProcess)
                                 blocked.remove(blockedProcess)
                                 readyQueue = sorted(readyQueue, key = lambda tup: (tup[0], tup[2]))
                             pass
-                    elif(splitData[1] == "END"):
-                        # The client ordered the communication to be done.
-                        print 'CT:{} || Ending program'.format(currentTime)
-                    else: # KILLING a process
-                        # Determine wether that process is still on the list
+                    elif(splitData[1] == "KILL"):
+                        # Determine wether that process is still on the readyQueue
                         for process in readyQueue:
                             if (process[1] == int(splitData[2])):
                                 removeTuple = process
                             pass
-                        # If it is on the list
+                        # If it's on the queue...
                         if(removeTuple != ()):
-                            print 'CT:{} || Killed P{}'.format(currentTime,removeTuple[1])
                             readyQueue.remove(removeTuple)
+                            killed.append(removeTuple)
 
                             # This happens if we kill an ongoing process
                             if(removeTuple[1] == cpu1[1]):
                                 copyNonEditedRunning = readyQueue[0]
                                 cpu1 = [readyQueue[0][0], readyQueue[0][1]]
-                                print 'CT:{} || Started ({},P{})'.format(currentTime,cpu1[0], cpu1[1])
                             removeTuple = ()
-                        else:
-                            #Not on the list, inform the client it's not in the list
-                            print "CT:{} || Tried to kill P{}".format(currentTime,splitData[2])
-
+                    else:
+                        # The client ordered the communication to be done.
+                        table1.add_row([copy.deepcopy(currentTime),copy.deepcopy(arrived),copy.deepcopy(readyQueue),copy.deepcopy(cpu1),copy.deepcopy(blocked),copy.deepcopy(finished),copy.deepcopy(killed)])
+                        print table1
                     connection.sendall('ACK')
         else: # Two CPU's
             print "Two CPU, SJF"
